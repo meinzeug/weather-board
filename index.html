@@ -292,6 +292,16 @@
     color: #8b949e;
     font-size: 0.8rem;
   }
+  .day-switcher {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .day-switcher label {
+    color: #8b949e;
+    font-size: 0.8rem;
+  }
   .dwd-select {
     background: #161b22;
     color: #e1e4e8;
@@ -302,6 +312,20 @@
     max-width: 100%;
   }
   .dwd-select:focus {
+    outline: none;
+    border-color: #58a6ff;
+    box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+  }
+  .day-select {
+    background: #161b22;
+    color: #e1e4e8;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+    padding: 8px 12px;
+    min-width: 170px;
+    max-width: 180px;
+  }
+  .day-select:focus {
     outline: none;
     border-color: #58a6ff;
     box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
@@ -349,6 +373,12 @@
     <div class="station-picker">
       <input type="text" id="station-query" class="station-input" placeholder="PLZ oder Ort eingeben" autocomplete="off" />
       <div id="station-suggestions" class="station-suggestions hidden"></div>
+    </div>
+    <div class="day-switcher">
+      <label for="day-switcher-select">📅 Tag:</label>
+      <select id="day-switcher-select" class="day-select">
+        <option value="0">Heute</option>
+      </select>
     </div>
     <span id="countdown"></span>
     <button class="refresh-btn" onclick="loadData()">↻ Aktualisieren</button>
@@ -441,6 +471,7 @@ const DWD_STATION_COOKIE = 'weather_station_dwd';
 let refreshTimer = null;
 let countdownSec = 600;
 let stationSearchTimer = null;
+let selectedForecastDayIndex = 0;
 let selectedStation = { ...DEFAULT_STATION };
 let selectedDWDStation = null;
 let currentDwdStations = [];
@@ -483,6 +514,51 @@ function renderMeta() {
   const lonDir = selectedStation.lon >= 0 ? 'O' : 'W';
   document.getElementById('meta-location').textContent =
     `📍 ${stationLabel(selectedStation)} · ${lat}°${latDir}, ${lon}°${lonDir}`;
+}
+
+function formatForecastDayLabel(dateStr, idx) {
+  const dt = new Date(dateStr + 'T00:00:00');
+  const day = DAYS[dt.getDay()];
+  const date = dt.getDate().toString().padStart(2, '0');
+  const month = MONTHS[dt.getMonth()];
+  if (idx === 0) return `Heute – ${day} ${date}. ${month}`;
+  if (idx === 1) return `Morgen – ${day} ${date}. ${month}`;
+  return `${day} ${date}. ${month}`;
+}
+
+function renderDaySwitcher(daily) {
+  const select = document.getElementById('day-switcher-select');
+  if (!daily || !Array.isArray(daily.time) || daily.time.length === 0) {
+    select.innerHTML = '<option value="0">Heute</option>';
+    select.value = '0';
+    selectedForecastDayIndex = 0;
+    return;
+  }
+
+  let previous = Number(select.value);
+  if (!Number.isFinite(previous) || previous < 0) {
+    selectedForecastDayIndex = 0;
+  } else if (selectedForecastDayIndex > daily.time.length - 1) {
+    selectedForecastDayIndex = 0;
+  }
+
+  select.innerHTML = '';
+  const max = daily.time.length - 1;
+  for (let idx = 0; idx <= max; idx++) {
+    const option = document.createElement('option');
+    option.value = String(idx);
+    option.textContent = formatForecastDayLabel(daily.time[idx], idx);
+    select.appendChild(option);
+  }
+
+  if (!Number.isFinite(previous) || previous < 0 || previous > max) {
+    previous = 0;
+  }
+  if (!Number.isFinite(selectedForecastDayIndex) || selectedForecastDayIndex < 0 || selectedForecastDayIndex > max) {
+    selectedForecastDayIndex = 0;
+  }
+  select.value = String(Math.max(0, Math.min(max, previous, selectedForecastDayIndex)));
+  selectedForecastDayIndex = Number(select.value);
 }
 
 function persistStation(st) {
@@ -597,6 +673,9 @@ function showSuggestions(stations) {
     option.addEventListener('click', () => {
       selectedStation = { ...station };
       document.getElementById('station-query').value = stationLabel(station);
+      selectedForecastDayIndex = 0;
+      const daySwitcher = document.getElementById('day-switcher-select');
+      if (daySwitcher) daySwitcher.value = '0';
       persistStation(selectedStation);
       selectedDWDStation = null;
       persistDWDStation(null);
@@ -739,24 +818,54 @@ function buildDailyHourIndex(h) {
   return bucket;
 }
 
+function getHourlyIndexesForDay(om, dayIndex) {
+  if (!om?.hourly?.time || !om.daily?.time) return [];
+  const day = om.daily.time[dayIndex];
+  if (!day) return [];
+  const idx = [];
+  for (let i = 0; i < om.hourly.time.length; i++) {
+    if (om.hourly.time[i].startsWith(day)) idx.push(i);
+  }
+  return idx;
+}
+
+function getRepresentativeIndex(om, dayIndex) {
+  const idx = getHourlyIndexesForDay(om, dayIndex);
+  if (!idx.length) return -1;
+  if (dayIndex === 0) return Math.max(0, idx[Math.floor(idx.length / 2)] - 1);
+  const noon = idx.reduce((best, i) => {
+    const hour = new Date(om.hourly.time[i]).getHours();
+    const score = Math.abs(hour - 12);
+    return (score < best.score) ? { idx: i, score } : best;
+  }, { idx: idx[0], score: 999 });
+  return noon.idx;
+}
+
 function renderAgrarCurrent(om) {
   const c = om.current;
   const h = om.hourly;
-  const now = new Date();
-  const idx = h.time.findIndex(t => new Date(t) >= now) - 1;
-  const i = Math.max(0, idx);
+  const currentIdx = getRepresentativeIndex(om, selectedForecastDayIndex);
+  const idx = Math.max(0, currentIdx >= 0 ? currentIdx : 0);
 
-  const et0 = h.et0_fao_evapotranspiration?.[i];
-  const evap = h.evapotranspiration?.[i];
-  const vpd = h.vapour_pressure_deficit?.[i];
-  const rad = h.shortwave_radiation?.[i];
-  const lw = h.leaf_wetness_probability?.[i];
+  const isNow = selectedForecastDayIndex === 0;
+  const et0 = h.et0_fao_evapotranspiration?.[idx];
+  const evap = h.evapotranspiration?.[idx];
+  const vpd = h.vapour_pressure_deficit?.[idx];
+  const rad = h.shortwave_radiation?.[idx];
+  const lw = h.leaf_wetness_probability?.[idx];
+  const temp = isNow ? c?.temperature_2m : h.temperature_2m?.[idx];
+  const humidity = isNow ? c?.relative_humidity_2m : h.relative_humidity_2m?.[idx];
+  const precip = h.precipitation?.[idx];
+  const wind = isNow ? c?.wind_speed_10m : h.wind_speed_10m?.[idx];
+  const pressure = isNow ? c?.surface_pressure : c?.surface_pressure;
+  const apparent = isNow ? c?.apparent_temperature : h.apparent_temperature?.[idx];
+  const weatherCode = isNow ? c?.weather_code : om.daily?.weather_code?.[selectedForecastDayIndex] || 1;
 
   document.getElementById('agrar-current').innerHTML = `
-    ${card('🌡️ Temperatur', fmt(c.temperature_2m), '°C', 'agrar', 'Open-Meteo')}
-    ${card('💧 Relative Feuchte', fmt(c.relative_humidity_2m, 0), '%', 'agrar', 'Open-Meteo')}
-    ${card('🌧️ Niederschlag (aktuell)', fmt(c.precipitation), 'mm', 'agrar', 'Open-Meteo')}
-    ${card('💨 Wind', fmt(c.wind_speed_10m), 'km/h', 'agrar', 'Open-Meteo')}
+    ${card('🌡️ Temperatur', fmt(temp), '°C', 'agrar', 'Open-Meteo')}
+    ${card('💧 Relative Feuchte', fmt(humidity, 0), '%', 'agrar', 'Open-Meteo')}
+    ${card('🌧️ Niederschlag', fmt(precip), 'mm', 'agrar', 'Open-Meteo')}
+    ${card('💨 Wind', fmt(wind), 'km/h', 'agrar', 'Open-Meteo')}
     ${card('☀️ Solarstrahlung', fmt(rad, 0), 'W/m²', 'agrar', 'Open-Meteo')}
     ${card('💦 Verdunstung (ET)', fmt(evap), 'mm/h', 'agrar', 'Open-Meteo')}
     ${card('🌿 ET₀ (Referenz)', fmt(et0), 'mm/h', 'agrar', 'Open-Meteo')}
@@ -764,16 +873,16 @@ function renderAgrarCurrent(om) {
       `<div style="font-size:0.75rem;color:#6e7681;margin-top:4px;">${vpd > 2 ? '⚠️ Trockenstress möglich' : vpd > 1 ? '🟡 Mäßig' : '✅ Gut'}</div>`
     )}
     ${card('🍃 Blattfeuchte', lw !== undefined ? fmt(lw, 0) : '—', '%', 'agrar', 'Open-Meteo')}
-    ${card('🌬️ Luftdruck', fmt(c.surface_pressure, 0), 'hPa', '', 'Open-Meteo')}
-    ${card('🌡️ Gefühlte Temp.', fmt(c.apparent_temperature), '°C', '', 'Open-Meteo')}
-    ${card('🌤️ Wetterlage', WMO_ICONS[c.weather_code] + ' ' + (WMO_CODES[c.weather_code]||'—'), '', '', 'Open-Meteo')}
+    ${card('🌬️ Luftdruck', fmt(pressure, 0), 'hPa', '', 'Open-Meteo')}
+    ${card('🌡️ Gefühlte Temp.', fmt(apparent), '°C', '', 'Open-Meteo')}
+    ${card('🌤️ Wetterlage', WMO_ICONS[weatherCode] + ' ' + (WMO_CODES[weatherCode]||'—'), '', '', 'Open-Meteo')}
   `;
 }
 
 function renderSoil(om) {
   const h = om.hourly;
-  const now = new Date();
-  const idx = Math.max(0, h.time.findIndex(t => new Date(t) >= now) - 1);
+  const dayIdx = getRepresentativeIndex(om, selectedForecastDayIndex);
+  const idx = Math.max(0, dayIdx >= 0 ? dayIdx : 0);
 
   document.getElementById('soil-data').innerHTML = `
     ${card('🌡️ Bodentemp. 0cm', fmt(h.soil_temperature_0cm?.[idx]), '°C', 'soil', 'Open-Meteo')}
@@ -785,14 +894,15 @@ function renderSoil(om) {
   `;
 }
 
-function renderPollen(air) {
+function renderPollen(air, om) {
   if (air.error) {
     document.getElementById('pollen-data').innerHTML = `<div class="error-msg">Luftqualitäts-API: ${air.error}</div>`;
     return;
   }
   const h = air.hourly;
-  const now = new Date();
-  const idx = Math.max(0, (h?.time||[]).findIndex(t => new Date(t) >= now) - 1);
+  const refIdx = Math.max(0, (h?.time || []).findIndex(t => new Date(t) >= new Date()) - 1);
+  const dayIdx = getRepresentativeIndex(om, selectedForecastDayIndex);
+  const idx = Math.max(0, dayIdx >= 0 ? dayIdx : refIdx);
 
   function pollenCard(name, val, unit='grains/m³') {
     const v = val?.[idx];
@@ -819,10 +929,12 @@ function renderPollen(air) {
 }
 
 function renderSourceCompare(om, wttr, bs) {
-  let omTemp = om?.current?.temperature_2m;
-  let omHum = om?.current?.relative_humidity_2m;
-  let omWind = om?.current?.wind_speed_10m;
-  let omCode = om?.current?.weather_code;
+  const idx = getRepresentativeIndex(om, selectedForecastDayIndex);
+  const currentIdx = Math.max(0, idx >= 0 ? idx : 0);
+  let omTemp = om?.hourly?.temperature_2m?.[currentIdx];
+  let omHum = om?.hourly?.relative_humidity_2m?.[currentIdx];
+  let omWind = om?.hourly?.wind_speed_10m?.[currentIdx];
+  let omCode = om?.daily?.weather_code?.[selectedForecastDayIndex] || om?.current?.weather_code || 1;
 
   let wttrTemp = wttr?.current_condition?.[0]?.temp_C;
   let wttrHum = wttr?.current_condition?.[0]?.humidity;
@@ -867,11 +979,12 @@ function renderSourceCompare(om, wttr, bs) {
 
 function renderHourly(om) {
   const h = om.hourly;
-  const now = new Date();
-  const startIdx = Math.max(0, h.time.findIndex(t => new Date(t) >= now));
+  const dayIdxs = getHourlyIndexesForDay(om, selectedForecastDayIndex);
+  const startIdx = dayIdxs.length ? dayIdxs[0] : 0;
+  const endIdx = dayIdxs.length ? dayIdxs[dayIdxs.length - 1] : -1;
 
   let html = '';
-  for (let i = startIdx; i < Math.min(startIdx + 24, h.time.length); i++) {
+  for (let i = startIdx; i <= Math.min(startIdx + 23, endIdx >= 0 ? endIdx : h.time.length - 1); i++) {
     const t = new Date(h.time[i]);
     const hh = t.getHours().toString().padStart(2,'0') + ':00';
     const temp = fmt(h.temperature_2m?.[i]);
@@ -884,18 +997,21 @@ function renderHourly(om) {
       <div class="rh">💧${rh}%</div>
     </div>`;
   }
-  document.getElementById('hourly-row').innerHTML = html;
+  document.getElementById('hourly-row').innerHTML = html || '<div class="error-msg">Keine Stundenwerte für diesen Tag.</div>';
 }
 
 function renderForecast(om) {
   const d = om.daily;
-  let html = '';
-  for (let i = 0; i < d.time.length; i++) {
-    const dt = new Date(d.time[i]);
-    const day = DAYS[dt.getDay()];
-    const date = dt.getDate() + '. ' + MONTHS[dt.getMonth()];
-    const code = d.weather_code?.[i];
-    html += `<tr>
+  if (!d?.time?.length) {
+    document.getElementById('forecast-body').innerHTML = '';
+    return;
+  }
+  const i = Math.max(0, Math.min(d.time.length - 1, selectedForecastDayIndex));
+  const dt = new Date(d.time[i]);
+  const day = DAYS[dt.getDay()];
+  const date = dt.getDate() + '. ' + MONTHS[dt.getMonth()];
+  const code = d.weather_code?.[i];
+  const html = `<tr>
       <td><strong>${day}</strong> ${date}</td>
       <td>${WMO_ICONS[code]||'—'} <span style="font-size:0.8rem">${WMO_CODES[code]||'—'}</span></td>
       <td class="temp-max">${fmt(d.temperature_2m_max?.[i])}°C</td>
@@ -906,7 +1022,6 @@ function renderForecast(om) {
       <td>${fmt(d.shortwave_radiation_sum?.[i], 0)} MJ/m²</td>
       <td>${fmt(d.et0_fao_evapotranspiration?.[i])} mm</td>
     </tr>`;
-  }
   document.getElementById('forecast-body').innerHTML = html;
 }
 
@@ -920,68 +1035,67 @@ function renderDailyDetail(om) {
   }
 
   const dailyHours = buildDailyHourIndex(h);
-  const cards = d.time.map((day, idx) => {
-    const ts = day.slice(0, 10);
-    const dayHours = dailyHours.get(ts) || [];
-    const tmax = d.temperature_2m_max?.[idx];
-    const tmin = d.temperature_2m_min?.[idx];
-    const prc = d.precipitation_sum?.[idx];
-    const pop = d.precipitation_probability_max?.[idx];
-    const wind = d.wind_speed_10m_max?.[idx];
-    const rad = d.shortwave_radiation_sum?.[idx];
-    const et0 = d.et0_fao_evapotranspiration?.[idx];
-    const wxCode = d.weather_code?.[idx];
-    const wxTxt = WMO_CODES[wxCode] || '—';
+  const idx = Math.max(0, Math.min(d.time.length - 1, selectedForecastDayIndex));
+  const day = d.time[idx];
+  const ts = day.slice(0, 10);
+  const dayHours = dailyHours.get(ts) || [];
+  const tmax = d.temperature_2m_max?.[idx];
+  const tmin = d.temperature_2m_min?.[idx];
+  const prc = d.precipitation_sum?.[idx];
+  const wind = d.wind_speed_10m_max?.[idx];
+  const rad = d.shortwave_radiation_sum?.[idx];
+  const et0 = d.et0_fao_evapotranspiration?.[idx];
+  const wxCode = d.weather_code?.[idx];
+  const wxTxt = WMO_CODES[wxCode] || '—';
 
-    const hum = dayHours.map(i => h.relative_humidity_2m?.[i]).filter(v => typeof v === 'number');
-    const precip = dayHours.map(i => h.precipitation?.[i]).filter(v => typeof v === 'number');
-    const windAvg = dayHours.map(i => h.wind_speed_10m?.[i]).filter(v => typeof v === 'number');
-    const dew = dayHours.map(i => h.soil_temperature_0cm?.[i]).filter(v => typeof v === 'number');
+  const hum = dayHours.map(i => h.relative_humidity_2m?.[i]).filter(v => typeof v === 'number');
+  const precip = dayHours.map(i => h.precipitation?.[i]).filter(v => typeof v === 'number');
+  const windAvg = dayHours.map(i => h.wind_speed_10m?.[i]).filter(v => typeof v === 'number');
+  const dew = dayHours.map(i => h.soil_temperature_0cm?.[i]).filter(v => typeof v === 'number');
 
-    const dayObj = new Date(ts + 'T00:00:00');
-    const dayHeader = `${DAYS[dayObj.getDay()]} ${String(dayObj.getDate()).padStart(2,'0')}. ${MONTHS[dayObj.getMonth()]}`;
-    const rainSum = sumValues(precip);
-    const humAvg = average(hum);
-    const windAvgVal = average(windAvg);
-    const dewAvg = average(dew);
+  const dayObj = new Date(ts + 'T00:00:00');
+  const dayHeader = `${DAYS[dayObj.getDay()]} ${String(dayObj.getDate()).padStart(2,'0')}. ${MONTHS[dayObj.getMonth()]}`;
+  const rainSum = sumValues(precip);
+  const humAvg = average(hum);
+  const windAvgVal = average(windAvg);
+  const dewAvg = average(dew);
 
-    return `
-      <div class="daily-detail-card">
-        <div class="day-title">
-          <span>📆 ${dayHeader}</span>
-          <span class="day-code">${WMO_ICONS[wxCode] || '—'} ${wxTxt}</span>
+  const cards = `
+    <div class="daily-detail-card">
+      <div class="day-title">
+        <span>📆 ${dayHeader}</span>
+        <span class="day-code">${WMO_ICONS[wxCode] || '—'} ${wxTxt}</span>
+      </div>
+      <div class="day-stats">
+        <div class="day-stat">
+          <div class="label">Temp. (min / max)</div>
+          <div class="value">${fmt(tmin)}° / ${fmt(tmax)}°C</div>
         </div>
-        <div class="day-stats">
-          <div class="day-stat">
-            <div class="label">Temp. (min / max)</div>
-            <div class="value">${fmt(tmin)}° / ${fmt(tmax)}°C</div>
-          </div>
-          <div class="day-stat">
-            <div class="label">Mittlere Luftfeuchte</div>
-            <div class="value">${humAvg !== null ? humAvg.toFixed(0) : '—'} %</div>
-          </div>
-          <div class="day-stat">
-            <div class="label">Niederschlag / Regenchance</div>
-            <div class="value">${rainSum !== null ? rainSum.toFixed(1) : '—'} / ${fmt(prc,0)}%</div>
-          </div>
-          <div class="day-stat">
-            <div class="label">Wind</div>
-            <div class="value">${fmt(wind, 1)} km/h (${windAvgVal !== null ? 'Ø ' + windAvgVal.toFixed(1) : '—'})</div>
-          </div>
-          <div class="day-stat">
-            <div class="label">Bodentemp. Ø 0 cm</div>
-            <div class="value">${dewAvg !== null ? dewAvg.toFixed(1) : '—'}°C</div>
-          </div>
-          <div class="day-stat">
-            <div class="label">Energie/ET₀</div>
-            <div class="value">${et0 !== null && et0 !== undefined ? et0.toFixed(2) : '—'} / ${fmt(rad,0)} MJ/m²</div>
-          </div>
+        <div class="day-stat">
+          <div class="label">Mittlere Luftfeuchte</div>
+          <div class="value">${humAvg !== null ? humAvg.toFixed(0) : '—'} %</div>
+        </div>
+        <div class="day-stat">
+          <div class="label">Niederschlag / Regenchance</div>
+          <div class="value">${rainSum !== null ? rainSum.toFixed(1) : '—'} / ${fmt(prc,0)}%</div>
+        </div>
+        <div class="day-stat">
+          <div class="label">Wind</div>
+          <div class="value">${fmt(wind, 1)} km/h (${windAvgVal !== null ? 'Ø ' + windAvgVal.toFixed(1) : '—'})</div>
+        </div>
+        <div class="day-stat">
+          <div class="label">Bodentemp. Ø 0 cm</div>
+          <div class="value">${dewAvg !== null ? dewAvg.toFixed(1) : '—'}°C</div>
+        </div>
+        <div class="day-stat">
+          <div class="label">Energie/ET₀</div>
+          <div class="value">${et0 !== null && et0 !== undefined ? et0.toFixed(2) : '—'} / ${fmt(rad,0)} MJ/m²</div>
         </div>
       </div>
-    `;
-  });
+    </div>
+  `;
 
-  document.getElementById('daily-detail').innerHTML = cards.join('');
+  document.getElementById('daily-detail').innerHTML = cards;
 }
 
 function renderDWD(bs) {
@@ -1009,6 +1123,50 @@ function renderDWD(bs) {
   `;
 }
 
+let latestWeatherPayload = null;
+
+function renderDashboardFromPayload(data) {
+  const om = data.open_meteo_agro;
+  const air = data.open_meteo_air;
+  const bs = data.bright_sky;
+  const wttr = data.wttr;
+  if (data.location) {
+    selectedStation = {
+      ...selectedStation,
+      name: data.location.name || selectedStation.name,
+      lat: Number(data.location.lat),
+      lon: Number(data.location.lon),
+      label: selectedStation.label
+    };
+  }
+
+  renderMeta();
+  if (om?.daily?.time) {
+    renderDaySwitcher(om.daily);
+  }
+  renderDWDStationSelector(bs?.sources || []);
+
+  setDot('om', om?.error ? 'error' : 'ok');
+  setDot('air', air?.error ? 'error' : 'ok');
+  setDot('dwd', bs?.error ? 'error' : 'ok');
+  setDot('wttr', wttr?.error ? 'error' : 'ok');
+
+  if (!om?.error && om?.current) {
+    renderAgrarCurrent(om);
+    renderSoil(om);
+    renderHourly(om);
+    renderForecast(om);
+    renderDailyDetail(om);
+  } else {
+    document.getElementById('agrar-current').innerHTML = `<div class="error-msg">Open-Meteo Fehler: ${om?.error||'Unbekannt'}</div>`;
+    document.getElementById('daily-detail').innerHTML = `<div class="error-msg">Detaillierte Tagesdaten nicht verfügbar.</div>`;
+  }
+
+    renderPollen(air, om);
+  renderSourceCompare(om, wttr, bs);
+  renderDWD(bs);
+}
+
 async function loadData() {
   const btn = document.querySelector('.refresh-btn');
   btn.disabled = true;
@@ -1031,42 +1189,8 @@ async function loadData() {
     }
     const res = await fetch(`/api/weather?${params}`);
     const data = await res.json();
-
-    const om = data.open_meteo_agro;
-    const air = data.open_meteo_air;
-    const bs = data.bright_sky;
-    const wttr = data.wttr;
-    if (data.location) {
-      selectedStation = {
-        ...selectedStation,
-        name: data.location.name || selectedStation.name,
-        lat: Number(data.location.lat),
-        lon: Number(data.location.lon),
-        label: selectedStation.label
-      };
-    }
-    renderMeta();
-    renderDWDStationSelector(bs?.sources || []);
-
-    setDot('om', om?.error ? 'error' : 'ok');
-    setDot('air', air?.error ? 'error' : 'ok');
-    setDot('dwd', bs?.error ? 'error' : 'ok');
-    setDot('wttr', wttr?.error ? 'error' : 'ok');
-
-    if (!om?.error && om?.current) {
-      renderAgrarCurrent(om);
-      renderSoil(om);
-      renderHourly(om);
-      renderForecast(om);
-      renderDailyDetail(om);
-    } else {
-      document.getElementById('agrar-current').innerHTML = `<div class="error-msg">Open-Meteo Fehler: ${om?.error||'Unbekannt'}</div>`;
-      document.getElementById('daily-detail').innerHTML = `<div class="error-msg">Detaillierte Tagesdaten nicht verfügbar.</div>`;
-    }
-
-    renderPollen(air);
-    renderSourceCompare(om, wttr, bs);
-    renderDWD(bs);
+    latestWeatherPayload = data;
+    renderDashboardFromPayload(data);
 
     const fetchTime = new Date(data.fetchedAt);
     document.getElementById('last-fetch').textContent =
@@ -1105,8 +1229,25 @@ const dwdSelect = document.getElementById('dwd-station-select');
 dwdSelect.addEventListener('change', () => {
   const selectedId = dwdSelect.value;
   const selected = currentDwdStations.find(s => s.id === selectedId) || null;
+  if (selectedId) {
+    selectedForecastDayIndex = 0;
+    const daySelect = document.getElementById('day-switcher-select');
+    daySelect.value = '0';
+  }
   setCurrentDWDStation(selected);
   loadData();
+});
+const daySelect = document.getElementById('day-switcher-select');
+daySelect.addEventListener('change', () => {
+  selectedForecastDayIndex = Number(daySelect.value) || 0;
+  if (latestWeatherPayload) {
+    renderDashboardFromPayload(latestWeatherPayload);
+    const fetchTime = latestWeatherPayload?.fetchedAt ? new Date(latestWeatherPayload.fetchedAt) : new Date();
+    document.getElementById('last-fetch').textContent =
+      `Zuletzt geladen: ${fetchTime.toLocaleTimeString('de-DE')} Uhr`;
+  } else {
+    loadData();
+  }
 });
 
 stationInput.addEventListener('input', () => {
