@@ -281,6 +281,31 @@
   .station-suggestions.hidden {
     display: none;
   }
+  .dwd-station-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 8px 0 12px;
+    flex-wrap: wrap;
+  }
+  .dwd-station-row label {
+    color: #8b949e;
+    font-size: 0.8rem;
+  }
+  .dwd-select {
+    background: #161b22;
+    color: #e1e4e8;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+    padding: 8px 12px;
+    min-width: 360px;
+    max-width: 100%;
+  }
+  .dwd-select:focus {
+    outline: none;
+    border-color: #58a6ff;
+    box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+  }
 
   .weather-icon { font-size: 2rem; }
 
@@ -375,6 +400,12 @@
   <div class="daily-detail-grid" id="daily-detail"></div>
 
   <div class="section-title">🏛️ DWD Offizielle Messdaten (Bright Sky)</div>
+  <div class="dwd-station-row">
+    <label for="dwd-station-select">🌐 DWD-Station auswählen:</label>
+    <select id="dwd-station-select" class="dwd-select">
+      <option>Stationen werden geladen…</option>
+    </select>
+  </div>
   <div class="grid grid-3" id="dwd-data"></div>
 </main>
 
@@ -405,16 +436,23 @@ const DEFAULT_STATION = {
   label: '06636 Freyburg/Unstrut · Sachsen-Anhalt'
 };
 const STATION_COOKIE = 'weather_station';
+const DWD_STATION_COOKIE = 'weather_station_dwd';
 
 let refreshTimer = null;
 let countdownSec = 600;
 let stationSearchTimer = null;
 let selectedStation = { ...DEFAULT_STATION };
+let selectedDWDStation = null;
+let currentDwdStations = [];
 
 function setCookie(name, value, days = 365) {
   const date = new Date();
   date.setTime(date.getTime() + days * 24 * 60 * 60 * 1000);
   document.cookie = `${name}=${encodeURIComponent(value)}; expires=${date.toUTCString()}; path=/`;
+}
+
+function deleteCookie(name) {
+  document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/`;
 }
 
 function getCookie(name) {
@@ -432,6 +470,12 @@ function stationLabel(st) {
   return st.label || st.name || 'Unbekannt';
 }
 
+function dwdStationLabel(st) {
+  const base = st.station_name || st.name || 'DWD Station';
+  const extras = [st.dwd_station_id, st.wmo_station_id].filter(Boolean).join(' · ');
+  return extras ? `${base} (${extras})` : base;
+}
+
 function renderMeta() {
   const lat = Number(selectedStation.lat || 0).toFixed(4);
   const lon = Number(selectedStation.lon || 0).toFixed(4);
@@ -444,6 +488,18 @@ function renderMeta() {
 function persistStation(st) {
   try {
     setCookie(STATION_COOKIE, JSON.stringify(st));
+  } catch (e) {
+    // ignore cookie write issues
+  }
+}
+
+function persistDWDStation(st) {
+  if (!st) {
+    deleteCookie(DWD_STATION_COOKIE);
+    return;
+  }
+  try {
+    setCookie(DWD_STATION_COOKIE, JSON.stringify(st));
   } catch (e) {
     // ignore cookie write issues
   }
@@ -470,6 +526,49 @@ function restoreStation() {
   } catch (e) {
     // Ignore restore errors.
   }
+}
+
+function restoreDWDStation() {
+  try {
+    const raw = getCookie(DWD_STATION_COOKIE);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    const lat = Number(parsed?.lat);
+    const lon = Number(parsed?.lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      selectedDWDStation = {
+        id: parsed.id || `${lat}-${lon}`,
+        station_name: parsed.station_name || parsed.name || 'DWD Station',
+        name: parsed.name || parsed.station_name || 'DWD Station',
+        label: parsed.label || dwdStationLabel(parsed),
+        dwd_station_id: parsed.dwd_station_id || null,
+        wmo_station_id: parsed.wmo_station_id || null,
+        lat,
+        lon
+      };
+    }
+  } catch (e) {
+    // Ignore restore errors.
+  }
+}
+
+function normalizeDWDStation(raw, idx) {
+  return {
+    id: String(raw.id ?? raw.source_id ?? raw.dwd_station_id ?? raw.wmo_station_id ?? `${idx}-${raw.lat}-${raw.lon}`),
+    station_name: raw.station_name || `DWD Station ${idx + 1}`,
+    dwd_station_id: raw.dwd_station_id || null,
+    wmo_station_id: raw.wmo_station_id || null,
+    lat: Number(raw.lat),
+    lon: Number(raw.lon),
+    distance: Number(raw.distance),
+    observation_type: raw.observation_type || ''
+  };
+}
+
+function setCurrentDWDStation(station) {
+  selectedDWDStation = station ? { ...station, label: dwdStationLabel(station) } : null;
+  persistDWDStation(selectedDWDStation);
+  return selectedDWDStation;
 }
 
 function hideSuggestions() {
@@ -499,6 +598,8 @@ function showSuggestions(stations) {
       selectedStation = { ...station };
       document.getElementById('station-query').value = stationLabel(station);
       persistStation(selectedStation);
+      selectedDWDStation = null;
+      persistDWDStation(null);
       hideSuggestions();
       loadData();
       renderMeta();
@@ -522,6 +623,78 @@ async function searchStations() {
     showSuggestions(stations);
   } catch (e) {
     showSuggestions([]);
+  }
+}
+
+function renderDWDStationSelector(bsSources) {
+  const select = document.getElementById('dwd-station-select');
+  select.disabled = false;
+  select.innerHTML = '';
+  currentDwdStations = [];
+
+  const sources = Array.isArray(bsSources) ? bsSources : [];
+  const seen = new Set();
+  const stations = [];
+  sources.forEach((raw, idx) => {
+    const normalized = normalizeDWDStation(raw, idx);
+    if (!Number.isFinite(normalized.lat) || !Number.isFinite(normalized.lon)) return;
+    if (seen.has(normalized.id)) return;
+    seen.add(normalized.id);
+    stations.push(normalized);
+  });
+
+  const autoOption = document.createElement('option');
+  autoOption.value = '';
+  autoOption.textContent = `Automatisch (nächste Station)`;
+  select.appendChild(autoOption);
+
+  stations.forEach(station => {
+    const option = document.createElement('option');
+    option.value = station.id;
+    option.textContent = `${dwdStationLabel(station)} ${station.distance ? ` · ${ (station.distance / 1000).toFixed(1) } km` : ''}`;
+    select.appendChild(option);
+    currentDwdStations.push(station);
+  });
+
+  if (stations.length === 0) {
+    const emptyOption = document.createElement('option');
+    emptyOption.value = '';
+    emptyOption.textContent = '⚠️ Keine DWD-Stationen gefunden';
+    select.appendChild(emptyOption);
+    select.disabled = true;
+    select.value = '';
+    selectedDWDStation = null;
+    persistDWDStation(null);
+    return;
+  }
+
+  const hadManual = Boolean(selectedDWDStation?.id);
+  const selectedLat = Number(selectedDWDStation?.lat);
+  const selectedLon = Number(selectedDWDStation?.lon);
+  const selectedDwdId = selectedDWDStation?.dwd_station_id;
+  const selectedWmoId = selectedDWDStation?.wmo_station_id;
+  const matchesCurrent =
+    selectedDWDStation && (
+      stations.find(s => s.id === selectedDWDStation.id) ||
+      stations.find(s => selectedDwdId && (s.dwd_station_id === selectedDwdId || s.wmo_station_id === selectedDwdId)) ||
+      stations.find(s => selectedWmoId && (s.dwd_station_id === selectedWmoId || s.wmo_station_id === selectedWmoId)) ||
+      (Number.isFinite(selectedLat) && Number.isFinite(selectedLon) ?
+        stations.find(s => Math.abs(s.lat - selectedLat) < 0.0001 && Math.abs(s.lon - selectedLon) < 0.0001)
+        : null)
+    );
+  const selectedId = matchesCurrent ? matchesCurrent.id : '';
+  select.value = selectedId;
+  if (hadManual && !matchesCurrent) {
+    selectedDWDStation = null;
+    persistDWDStation(null);
+  }
+
+  if (selectedId) {
+    const active = stations.find(s => s.id === selectedId);
+    if (active) {
+      selectedDWDStation = { ...active, label: dwdStationLabel(active) };
+      persistDWDStation(selectedDWDStation);
+    }
   }
 }
 
@@ -822,6 +995,7 @@ function renderDWD(bs) {
     return;
   }
   const windKmh = w.wind_speed ? (w.wind_speed * 3.6).toFixed(1) : null;
+  const stationInfo = selectedDWDStation || normalizeDWDStation(bs.sources?.[0], 0) || {};
   document.getElementById('dwd-data').innerHTML = `
     ${card('🌡️ Temperatur', fmt(w.temperature), '°C', '', 'DWD/BrightSky')}
     ${card('🌡️ Gefühlte Temp.', fmt(w.dew_point), '°C Taupunkt', '', 'DWD/BrightSky')}
@@ -830,8 +1004,8 @@ function renderDWD(bs) {
     ${card('💨 Wind', fmt(windKmh), 'km/h', '', 'DWD/BrightSky')}
     ${card('🌬️ Luftdruck', fmt(w.pressure_msl, 0), 'hPa', '', 'DWD/BrightSky')}
     ${card('☀️ Sonnenstrahlung', fmt(w.solar, 0), 'W/m²', '', 'DWD/BrightSky')}
-    ${card('📍 Station', bs.sources?.[0]?.station_name || '—', '', '', 'DWD/BrightSky')}
-    ${card('📏 Entfernung', bs.sources?.[0]?.distance ? fmt(bs.sources[0].distance/1000, 1) + ' km' : '—', '', '', 'DWD/BrightSky')}
+    ${card('📍 Station', stationInfo.station_name || stationInfo.name || '—', '', '', 'DWD/BrightSky')}
+    ${card('📏 Entfernung', stationInfo.distance ? fmt(stationInfo.distance/1000, 1) + ' km' : '—', '', '', 'DWD/BrightSky')}
   `;
 }
 
@@ -850,6 +1024,11 @@ async function loadData() {
       lon: String(selectedStation.lon),
       name: selectedStation.label || selectedStation.name || ''
     });
+    if (selectedDWDStation && selectedDWDStation.lat !== undefined && selectedDWDStation.lon !== undefined) {
+      params.set('dwdLat', String(selectedDWDStation.lat));
+      params.set('dwdLon', String(selectedDWDStation.lon));
+      params.set('dwdName', selectedDWDStation.station_name || selectedDWDStation.name || '');
+    }
     const res = await fetch(`/api/weather?${params}`);
     const data = await res.json();
 
@@ -866,8 +1045,8 @@ async function loadData() {
         label: selectedStation.label
       };
     }
-
     renderMeta();
+    renderDWDStationSelector(bs?.sources || []);
 
     setDot('om', om?.error ? 'error' : 'ok');
     setDot('air', air?.error ? 'error' : 'ok');
@@ -917,9 +1096,18 @@ function startCountdown() {
 }
 
 restoreStation();
+restoreDWDStation();
 renderMeta();
 const stationInput = document.getElementById('station-query');
 stationInput.value = stationLabel(selectedStation);
+
+const dwdSelect = document.getElementById('dwd-station-select');
+dwdSelect.addEventListener('change', () => {
+  const selectedId = dwdSelect.value;
+  const selected = currentDwdStations.find(s => s.id === selectedId) || null;
+  setCurrentDWDStation(selected);
+  loadData();
+});
 
 stationInput.addEventListener('input', () => {
   clearTimeout(stationSearchTimer);

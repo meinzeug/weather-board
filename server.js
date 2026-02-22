@@ -78,6 +78,28 @@ function sortByRelevance(stations, query) {
   });
 }
 
+function activeDWDStationFromQuery(req, fallbackStation) {
+  const lat = toValidCoordinate(req.query.dwdLat, -90, 90);
+  const lon = toValidCoordinate(req.query.dwdLon, -180, 180);
+  const name = safeLocationName(req.query.dwdName);
+
+  if (lat === null || lon === null) {
+    return {
+      name: 'Automatisch',
+      lat: fallbackStation.lat,
+      lon: fallbackStation.lon,
+      source: 'Automatik'
+    };
+  }
+
+  return {
+    name: name || 'Ausgewählte DWD-Station',
+    lat,
+    lon,
+    source: 'Auswahl'
+  };
+}
+
 app.get('/api/stations', async (req, res) => {
   const query = sanitizeQuery(req.query.q);
   if (!query) {
@@ -121,9 +143,12 @@ function fetchJSON(url) {
 
 app.get('/api/weather', async (req, res) => {
   const activeLocation = activeStationFromQuery(req);
+  const activeDwdStation = activeDWDStationFromQuery(req, activeLocation);
   const results = {};
   const LAT = activeLocation.lat;
   const LON = activeLocation.lon;
+  const DWD_LAT = activeDwdStation.lat;
+  const DWD_LON = activeDwdStation.lon;
 
   // 1. Open-Meteo - Agrarwetter (Hauptquelle)
   const omAgroUrl = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}` +
@@ -146,7 +171,7 @@ app.get('/api/weather', async (req, res) => {
   // 3. Bright Sky / DWD
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
-  const brightSkyUrl = `https://api.brightsky.dev/weather?lat=${LAT}&lon=${LON}&date=${dateStr}&tz=Europe/Berlin`;
+  const brightSkyUrl = `https://api.brightsky.dev/weather?lat=${DWD_LAT}&lon=${DWD_LON}&date=${dateStr}&tz=Europe/Berlin`;
 
   // 4. wttr.in
   const wttrUrl = `https://wttr.in/${LAT},${LON}?format=j1`;
@@ -169,6 +194,12 @@ app.get('/api/weather', async (req, res) => {
     lat: LAT,
     lon: LON,
     source: activeLocation.source
+  };
+  results.dwdLocation = {
+    name: activeDwdStation.name,
+    lat: DWD_LAT,
+    lon: DWD_LON,
+    source: activeDwdStation.source
   };
 
   res.json(results);
