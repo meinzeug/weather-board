@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🌾 Agrar-Wetter 06636 Freyburg/Unstrut</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #0f1117;
+    color: #e1e4e8;
+    min-height: 100vh;
+  }
+  header {
+    background: linear-gradient(135deg, #1a3a2a 0%, #1e3a5f 100%);
+    padding: 20px 30px;
+    border-bottom: 2px solid #2ea043;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  header h1 { font-size: 1.6rem; color: #7ee787; }
+  header .meta { font-size: 0.85rem; color: #8b949e; }
+  #status-bar {
+    background: #161b22;
+    padding: 8px 30px;
+    font-size: 0.8rem;
+    color: #8b949e;
+    border-bottom: 1px solid #21262d;
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .status-item { display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; }
+  .dot.error { background: #f85149; }
+  .dot.loading { background: #d29922; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  main { padding: 20px 30px; max-width: 1600px; margin: 0 auto; }
+
+  .section-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #7ee787;
+    margin: 24px 0 12px;
+    padding-left: 12px;
+    border-left: 3px solid #2ea043;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .grid { display: grid; gap: 16px; }
+  .grid-2 { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .grid-3 { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  .grid-4 { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+
+  .card {
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 10px;
+    padding: 18px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: #388bfd; }
+  .card .label {
+    font-size: 0.75rem;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+  .card .value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #e6edf3;
+  }
+  .card .unit { font-size: 1rem; color: #8b949e; margin-left: 4px; }
+  .card .source-tag {
+    display: inline-block;
+    font-size: 0.65rem;
+    background: #21262d;
+    color: #8b949e;
+    padding: 2px 7px;
+    border-radius: 20px;
+    margin-top: 8px;
+  }
+
+  /* Agrar highlight */
+  .card.agrar { border-color: #2ea043; }
+  .card.agrar .value { color: #7ee787; }
+
+  /* Soil cards */
+  .card.soil { border-color: #8b6914; }
+  .card.soil .value { color: #e3b341; }
+
+  /* Warning cards */
+  .card.warn { border-color: #9e6a03; }
+  .card.warn .value { color: #d29922; }
+
+  /* Forecast table */
+  .forecast-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin-top: 4px;
+  }
+  .forecast-table th {
+    background: #21262d;
+    color: #8b949e;
+    padding: 8px 12px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+  }
+  .forecast-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #21262d;
+    vertical-align: middle;
+  }
+  .forecast-table tr:hover td { background: #1c2128; }
+  .forecast-table .temp-max { color: #f85149; font-weight: 600; }
+  .forecast-table .temp-min { color: #388bfd; }
+  .forecast-table .rain { color: #58a6ff; }
+
+  /* Source comparison */
+  .source-block {
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .source-block h3 {
+    font-size: 0.85rem;
+    color: #8b949e;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .source-block .mini-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .source-block .mini-item { }
+  .source-block .mini-label { font-size: 0.7rem; color: #6e7681; }
+  .source-block .mini-val { font-size: 1.1rem; font-weight: 600; }
+
+  /* Pollen */
+  .pollen-bar {
+    height: 8px;
+    border-radius: 4px;
+    background: #21262d;
+    margin-top: 6px;
+    overflow: hidden;
+  }
+  .pollen-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #3fb950, #d29922, #f85149);
+    transition: width 0.5s;
+  }
+
+  .refresh-btn {
+    background: #238636;
+    color: white;
+    border: none;
+    padding: 8px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: background 0.2s;
+  }
+  .refresh-btn:hover { background: #2ea043; }
+  .refresh-btn:disabled { background: #21262d; cursor: not-allowed; }
+
+  #countdown { font-size: 0.8rem; color: #6e7681; }
+
+  .station-picker {
+    position: relative;
+  }
+  .station-input {
+    width: 320px;
+    max-width: 100%;
+    background: #161b22;
+    color: #e1e4e8;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+  }
+  .station-input:focus {
+    outline: none;
+    border-color: #58a6ff;
+    box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+  }
+  .station-suggestions {
+    position: absolute;
+    top: 38px;
+    left: 0;
+    right: 0;
+    max-height: 260px;
+    overflow: auto;
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+    z-index: 20;
+  }
+  .station-item {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: #e1e4e8;
+    padding: 9px 10px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .station-item:hover {
+    background: #1f6feb33;
+  }
+  .station-item--empty {
+    cursor: default;
+    color: #6e7681;
+  }
+  .station-item--empty:hover { background: none; }
+  .station-suggestions.hidden {
+    display: none;
+  }
+
+  .weather-icon { font-size: 2rem; }
+
+  .hourly-chart {
+    overflow-x: auto;
+    margin-top: 8px;
+  }
+  .hourly-row {
+    display: flex;
+    gap: 8px;
+    min-width: max-content;
+    padding-bottom: 8px;
+  }
+  .hour-cell {
+    background: #1c2128;
+    border: 1px solid #21262d;
+    border-radius: 8px;
+    padding: 10px 14px;
+    text-align: center;
+    min-width: 80px;
+  }
+  .hour-cell .hour { font-size: 0.7rem; color: #6e7681; }
+  .hour-cell .temp { font-size: 1rem; font-weight: 700; }
+  .hour-cell .precip { font-size: 0.75rem; color: #58a6ff; }
+  .hour-cell .rh { font-size: 0.7rem; color: #8b949e; }
+
+  .error-msg { color: #f85149; font-size: 0.85rem; padding: 8px; }
+  .loading-msg { color: #d29922; font-size: 0.85rem; padding: 8px; }
+
+  .wmo-code { font-size: 0.75rem; color: #8b949e; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🌾 Agrar-Wetter Dashboard</h1>
+    <div class="meta" id="meta-location">📍 06636 Freyburg/Unstrut, Sachsen-Anhalt · 51.2183°N, 11.7833°O</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;position:relative;">
+    <div class="station-picker">
+      <input type="text" id="station-query" class="station-input" placeholder="PLZ oder Ort eingeben" autocomplete="off" />
+      <div id="station-suggestions" class="station-suggestions hidden"></div>
+    </div>
+    <span id="countdown"></span>
+    <button class="refresh-btn" onclick="loadData()">↻ Aktualisieren</button>
+  </div>
+</header>
+
+<div id="status-bar">
+  <div class="status-item"><div class="dot loading" id="dot-om"></div> Open-Meteo Agrar</div>
+  <div class="status-item"><div class="dot loading" id="dot-air"></div> Luftqualität/Pollen</div>
+  <div class="status-item"><div class="dot loading" id="dot-dwd"></div> DWD / Bright Sky</div>
+  <div class="status-item"><div class="dot loading" id="dot-wttr"></div> wttr.in</div>
+  <div style="margin-left:auto;color:#6e7681" id="last-fetch">Lade Daten…</div>
+</div>
+
+<main>
+  <!-- AGRARWETTER -->
+  <div class="section-title">🌱 Agrarwetter (Open-Meteo — Hauptquelle)</div>
+  <div class="grid grid-2" id="agrar-current"></div>
+
+  <div class="section-title">🌡️ Aktuelles Wetter — Quellenvergleich</div>
+  <div class="grid grid-3" id="source-compare"></div>
+
+  <div class="section-title">🌍 Boden & Bodenfeuchte (Open-Meteo)</div>
+  <div class="grid grid-4" id="soil-data"></div>
+
+  <div class="section-title">🌼 Pollen & Luftqualität (Open-Meteo)</div>
+  <div class="grid grid-4" id="pollen-data"></div>
+
+  <div class="section-title">⏱️ Stündliche Vorschau — heute (Open-Meteo)</div>
+  <div class="hourly-chart"><div class="hourly-row" id="hourly-row"></div></div>
+
+  <div class="section-title">📅 7-Tage-Vorhersage (Open-Meteo)</div>
+  <div style="overflow-x:auto;">
+    <table class="forecast-table">
+      <thead>
+        <tr>
+          <th>Tag</th><th>☀️ Wetter</th>
+          <th>🌡️ Max</th><th>🌡️ Min</th>
+          <th>🌧️ Regen</th><th>☔ Regenwahrsch.</th>
+          <th>💨 Wind max</th><th>☀️ Strahlung</th>
+          <th>💧 ET₀</th>
+        </tr>
+      </thead>
+      <tbody id="forecast-body"></tbody>
+    </table>
+  </div>
+
+  <div class="section-title">🏛️ DWD Offizielle Messdaten (Bright Sky)</div>
+  <div class="grid grid-3" id="dwd-data"></div>
+</main>
+
+<script>
+const WMO_CODES = {
+  0:'Klarer Himmel',1:'Überwiegend klar',2:'Teilweise bewölkt',3:'Bedeckt',
+  45:'Nebel',48:'Eisnebel',
+  51:'Leichter Nieselregen',53:'Mäßiger Nieselregen',55:'Dichter Nieselregen',
+  61:'Leichter Regen',63:'Mäßiger Regen',65:'Starker Regen',
+  71:'Leichter Schneefall',73:'Mäßiger Schneefall',75:'Starker Schneefall',
+  80:'Leichte Regenschauer',81:'Mäßige Regenschauer',82:'Starke Regenschauer',
+  95:'Gewitter',96:'Gewitter mit Hagel',99:'Gewitter mit starkem Hagel'
+};
+const WMO_ICONS = {
+  0:'☀️',1:'🌤️',2:'⛅',3:'☁️',45:'🌫️',48:'🌫️',
+  51:'🌦️',53:'🌦️',55:'🌧️',61:'🌧️',63:'🌧️',65:'🌧️',
+  71:'🌨️',73:'🌨️',75:'❄️',80:'🌦️',81:'🌧️',82:'⛈️',
+  95:'⛈️',96:'⛈️',99:'⛈️'
+};
+
+const DAYS = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+const MONTHS = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
+const DEFAULT_STATION = {
+  id: 'default',
+  name: '06636 Freyburg/Unstrut',
+  lat: 51.2183,
+  lon: 11.7833,
+  label: '06636 Freyburg/Unstrut · Sachsen-Anhalt'
+};
+
+let refreshTimer = null;
+let countdownSec = 600;
+let stationSearchTimer = null;
+let selectedStation = { ...DEFAULT_STATION };
+
+function stationLabel(st) {
+  return st.label || st.name || 'Unbekannt';
+}
+
+function renderMeta() {
+  const lat = Number(selectedStation.lat || 0).toFixed(4);
+  const lon = Number(selectedStation.lon || 0).toFixed(4);
+  const latDir = selectedStation.lat >= 0 ? 'N' : 'S';
+  const lonDir = selectedStation.lon >= 0 ? 'O' : 'W';
+  document.getElementById('meta-location').textContent =
+    `📍 ${stationLabel(selectedStation)} · ${lat}°${latDir}, ${lon}°${lonDir}`;
+}
+
+function persistStation(st) {
+  try {
+    localStorage.setItem('weather_station', JSON.stringify(st));
+  } catch (e) {
+    // localStorage kann in manchen Umgebungen blockiert sein.
+  }
+}
+
+function restoreStation() {
+  try {
+    const raw = localStorage.getItem('weather_station');
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    const lat = Number(parsed?.lat);
+    const lon = Number(parsed?.lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      selectedStation = {
+        id: parsed.id || 'restored',
+        name: parsed.name || parsed.label || DEFAULT_STATION.name,
+        label: parsed.label || `${parsed.name || DEFAULT_STATION.name}`,
+        lat,
+        lon
+      };
+      document.getElementById('station-query').value = stationLabel(selectedStation);
+      renderMeta();
+    }
+  } catch (e) {
+    // Ignore restore errors.
+  }
+}
+
+function hideSuggestions() {
+  document.getElementById('station-suggestions').classList.add('hidden');
+}
+
+function showSuggestions(stations) {
+  const list = document.getElementById('station-suggestions');
+  list.innerHTML = '';
+
+  if (!stations.length) {
+    const empty = document.createElement('button');
+    empty.type = 'button';
+    empty.className = 'station-item station-item--empty';
+    empty.textContent = '❌ Keine Stationen gefunden';
+    list.appendChild(empty);
+    list.classList.remove('hidden');
+    return;
+  }
+
+  stations.forEach(station => {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = 'station-item';
+    option.textContent = station.label || `${station.name} (${station.postcode || 'kein PLZ'})`;
+    option.addEventListener('click', () => {
+      selectedStation = { ...station };
+      document.getElementById('station-query').value = stationLabel(station);
+      persistStation(selectedStation);
+      hideSuggestions();
+      loadData();
+      renderMeta();
+    });
+    list.appendChild(option);
+  });
+
+  list.classList.remove('hidden');
+}
+
+async function searchStations() {
+  const query = document.getElementById('station-query').value.trim();
+  if (query.length < 3) {
+    hideSuggestions();
+    return;
+  }
+  try {
+    const res = await fetch(`/api/stations?q=${encodeURIComponent(query)}`);
+    const data = await res.json();
+    const stations = Array.isArray(data.stations) ? data.stations : [];
+    showSuggestions(stations);
+  } catch (e) {
+    showSuggestions([]);
+  }
+}
+
+function fmt(v, dec=1) {
+  if (v === null || v === undefined || v !== v) return '—';
+  return typeof v === 'number' ? v.toFixed(dec) : v;
+}
+
+function setDot(id, state) {
+  const el = document.getElementById('dot-'+id);
+  if (!el) return;
+  el.className = 'dot ' + state;
+}
+
+function card(label, value, unit, extraClass='', source='', extra='') {
+  return `<div class="card ${extraClass}">
+    <div class="label">${label}</div>
+    <div class="value">${value}<span class="unit">${unit}</span></div>
+    ${extra}
+    ${source ? `<span class="source-tag">${source}</span>` : ''}
+  </div>`;
+}
+
+function renderAgrarCurrent(om) {
+  const c = om.current;
+  const h = om.hourly;
+  const now = new Date();
+  const idx = h.time.findIndex(t => new Date(t) >= now) - 1;
+  const i = Math.max(0, idx);
+
+  const et0 = h.et0_fao_evapotranspiration?.[i];
+  const evap = h.evapotranspiration?.[i];
+  const vpd = h.vapour_pressure_deficit?.[i];
+  const rad = h.shortwave_radiation?.[i];
+  const lw = h.leaf_wetness_probability?.[i];
+
+  document.getElementById('agrar-current').innerHTML = `
+    ${card('🌡️ Temperatur', fmt(c.temperature_2m), '°C', 'agrar', 'Open-Meteo')}
+    ${card('💧 Relative Feuchte', fmt(c.relative_humidity_2m, 0), '%', 'agrar', 'Open-Meteo')}
+    ${card('🌧️ Niederschlag (aktuell)', fmt(c.precipitation), 'mm', 'agrar', 'Open-Meteo')}
+    ${card('💨 Wind', fmt(c.wind_speed_10m), 'km/h', 'agrar', 'Open-Meteo')}
+    ${card('☀️ Solarstrahlung', fmt(rad, 0), 'W/m²', 'agrar', 'Open-Meteo')}
+    ${card('💦 Verdunstung (ET)', fmt(evap), 'mm/h', 'agrar', 'Open-Meteo')}
+    ${card('🌿 ET₀ (Referenz)', fmt(et0), 'mm/h', 'agrar', 'Open-Meteo')}
+    ${card('🔥 Sättigungsdefizit (VPD)', fmt(vpd), 'kPa', 'warn', 'Open-Meteo',
+      `<div style="font-size:0.75rem;color:#6e7681;margin-top:4px;">${vpd > 2 ? '⚠️ Trockenstress möglich' : vpd > 1 ? '🟡 Mäßig' : '✅ Gut'}</div>`
+    )}
+    ${card('🍃 Blattfeuchte', lw !== undefined ? fmt(lw, 0) : '—', '%', 'agrar', 'Open-Meteo')}
+    ${card('🌬️ Luftdruck', fmt(c.surface_pressure, 0), 'hPa', '', 'Open-Meteo')}
+    ${card('🌡️ Gefühlte Temp.', fmt(c.apparent_temperature), '°C', '', 'Open-Meteo')}
+    ${card('🌤️ Wetterlage', WMO_ICONS[c.weather_code] + ' ' + (WMO_CODES[c.weather_code]||'—'), '', '', 'Open-Meteo')}
+  `;
+}
+
+function renderSoil(om) {
+  const h = om.hourly;
+  const now = new Date();
+  const idx = Math.max(0, h.time.findIndex(t => new Date(t) >= now) - 1);
+
+  document.getElementById('soil-data').innerHTML = `
+    ${card('🌡️ Bodentemp. 0cm', fmt(h.soil_temperature_0cm?.[idx]), '°C', 'soil', 'Open-Meteo')}
+    ${card('🌡️ Bodentemp. 6cm', fmt(h.soil_temperature_6cm?.[idx]), '°C', 'soil', 'Open-Meteo')}
+    ${card('🌡️ Bodentemp. 18cm', fmt(h.soil_temperature_18cm?.[idx]), '°C', 'soil', 'Open-Meteo')}
+    ${card('💧 Bodenfeuchte 0-1cm', fmt(h.soil_moisture_0_to_1cm?.[idx], 3), 'm³/m³', 'soil', 'Open-Meteo')}
+    ${card('💧 Bodenfeuchte 1-3cm', fmt(h.soil_moisture_1_to_3cm?.[idx], 3), 'm³/m³', 'soil', 'Open-Meteo')}
+    ${card('💧 Bodenfeuchte 3-9cm', fmt(h.soil_moisture_3_to_9cm?.[idx], 3), 'm³/m³', 'soil', 'Open-Meteo')}
+  `;
+}
+
+function renderPollen(air) {
+  if (air.error) {
+    document.getElementById('pollen-data').innerHTML = `<div class="error-msg">Luftqualitäts-API: ${air.error}</div>`;
+    return;
+  }
+  const h = air.hourly;
+  const now = new Date();
+  const idx = Math.max(0, (h?.time||[]).findIndex(t => new Date(t) >= now) - 1);
+
+  function pollenCard(name, val, unit='grains/m³') {
+    const v = val?.[idx];
+    const max = 100;
+    const pct = v ? Math.min(100, (v/max)*100) : 0;
+    return `<div class="card">
+      <div class="label">${name}</div>
+      <div class="value">${fmt(v, 1)}<span class="unit"> ${unit}</span></div>
+      <div class="pollen-bar"><div class="pollen-fill" style="width:${pct}%"></div></div>
+      <span class="source-tag">Open-Meteo Air Quality</span>
+    </div>`;
+  }
+
+  document.getElementById('pollen-data').innerHTML = `
+    ${pollenCard('🌾 Gräserpollen', h?.grass_pollen)}
+    ${pollenCard('🌳 Birkenpollen', h?.birch_pollen)}
+    ${pollenCard('🌲 Erlenpollen', h?.alder_pollen)}
+    ${pollenCard('🌿 Beifußpollen', h?.mugwort_pollen)}
+    ${pollenCard('🫧 Feinstaub PM10', h?.pm10, 'µg/m³')}
+    ${pollenCard('💨 Feinstaub PM2.5', h?.pm2_5, 'µg/m³')}
+    ${pollenCard('🏜️ Staub', h?.dust, 'µg/m³')}
+    ${pollenCard('🌺 Ambrosiapollen', h?.ragweed_pollen)}
+  `;
+}
+
+function renderSourceCompare(om, wttr, bs) {
+  let omTemp = om?.current?.temperature_2m;
+  let omHum = om?.current?.relative_humidity_2m;
+  let omWind = om?.current?.wind_speed_10m;
+  let omCode = om?.current?.weather_code;
+
+  let wttrTemp = wttr?.current_condition?.[0]?.temp_C;
+  let wttrHum = wttr?.current_condition?.[0]?.humidity;
+  let wttrWind = wttr?.current_condition?.[0]?.windspeedKmph;
+  let wttrDesc = wttr?.current_condition?.[0]?.lang_de?.[0]?.value || wttr?.current_condition?.[0]?.weatherDesc?.[0]?.value;
+
+  let bsTemp = bs?.weather?.[0]?.temperature;
+  let bsHum = bs?.weather?.[0]?.relative_humidity;
+  let bsWind = bs?.weather?.[0]?.wind_speed ? (bs.weather[0].wind_speed * 3.6).toFixed(1) : null;
+  let bsPrecip = bs?.weather?.[0]?.precipitation;
+
+  document.getElementById('source-compare').innerHTML = `
+    <div class="source-block">
+      <h3>🌐 Open-Meteo</h3>
+      <div class="mini-grid">
+        <div class="mini-item"><div class="mini-label">Temperatur</div><div class="mini-val">${fmt(omTemp)}°C</div></div>
+        <div class="mini-item"><div class="mini-label">Feuchte</div><div class="mini-val">${fmt(omHum,0)}%</div></div>
+        <div class="mini-item"><div class="mini-label">Wind</div><div class="mini-val">${fmt(omWind)} km/h</div></div>
+        <div class="mini-item"><div class="mini-label">Wetter</div><div class="mini-val">${WMO_ICONS[omCode]||'—'} ${WMO_CODES[omCode]||'—'}</div></div>
+      </div>
+    </div>
+    <div class="source-block">
+      <h3>🌍 wttr.in</h3>
+      <div class="mini-grid">
+        <div class="mini-item"><div class="mini-label">Temperatur</div><div class="mini-val">${wttrTemp||'—'}°C</div></div>
+        <div class="mini-item"><div class="mini-label">Feuchte</div><div class="mini-val">${wttrHum||'—'}%</div></div>
+        <div class="mini-item"><div class="mini-label">Wind</div><div class="mini-val">${wttrWind||'—'} km/h</div></div>
+        <div class="mini-item"><div class="mini-label">Beschreibung</div><div class="mini-val" style="font-size:0.85rem">${wttrDesc||'—'}</div></div>
+      </div>
+    </div>
+    <div class="source-block">
+      <h3>🏛️ DWD / Bright Sky</h3>
+      <div class="mini-grid">
+        <div class="mini-item"><div class="mini-label">Temperatur</div><div class="mini-val">${bsTemp !== null && bsTemp !== undefined ? fmt(bsTemp) : '—'}°C</div></div>
+        <div class="mini-item"><div class="mini-label">Feuchte</div><div class="mini-val">${bsHum !== null && bsHum !== undefined ? fmt(bsHum,0) : '—'}%</div></div>
+        <div class="mini-item"><div class="mini-label">Wind</div><div class="mini-val">${bsWind||'—'} km/h</div></div>
+        <div class="mini-item"><div class="mini-label">Niederschlag</div><div class="mini-val">${bsPrecip !== null && bsPrecip !== undefined ? fmt(bsPrecip) : '—'} mm</div></div>
+      </div>
+    </div>
+  `;
+}
+
+function renderHourly(om) {
+  const h = om.hourly;
+  const now = new Date();
+  const startIdx = Math.max(0, h.time.findIndex(t => new Date(t) >= now));
+
+  let html = '';
+  for (let i = startIdx; i < Math.min(startIdx + 24, h.time.length); i++) {
+    const t = new Date(h.time[i]);
+    const hh = t.getHours().toString().padStart(2,'0') + ':00';
+    const temp = fmt(h.temperature_2m?.[i]);
+    const precip = h.precipitation?.[i] || 0;
+    const rh = fmt(h.relative_humidity_2m?.[i], 0);
+    html += `<div class="hour-cell">
+      <div class="hour">${hh}</div>
+      <div class="temp">${temp}°</div>
+      <div class="precip">${precip > 0 ? '💧' + fmt(precip) + 'mm' : '–'}</div>
+      <div class="rh">💧${rh}%</div>
+    </div>`;
+  }
+  document.getElementById('hourly-row').innerHTML = html;
+}
+
+function renderForecast(om) {
+  const d = om.daily;
+  let html = '';
+  for (let i = 0; i < d.time.length; i++) {
+    const dt = new Date(d.time[i]);
+    const day = DAYS[dt.getDay()];
+    const date = dt.getDate() + '. ' + MONTHS[dt.getMonth()];
+    const code = d.weather_code?.[i];
+    html += `<tr>
+      <td><strong>${day}</strong> ${date}</td>
+      <td>${WMO_ICONS[code]||'—'} <span style="font-size:0.8rem">${WMO_CODES[code]||'—'}</span></td>
+      <td class="temp-max">${fmt(d.temperature_2m_max?.[i])}°C</td>
+      <td class="temp-min">${fmt(d.temperature_2m_min?.[i])}°C</td>
+      <td class="rain">${fmt(d.precipitation_sum?.[i])} mm</td>
+      <td>${fmt(d.precipitation_probability_max?.[i], 0)} %</td>
+      <td>${fmt(d.wind_speed_10m_max?.[i])} km/h</td>
+      <td>${fmt(d.shortwave_radiation_sum?.[i], 0)} MJ/m²</td>
+      <td>${fmt(d.et0_fao_evapotranspiration?.[i])} mm</td>
+    </tr>`;
+  }
+  document.getElementById('forecast-body').innerHTML = html;
+}
+
+function renderDWD(bs) {
+  if (bs.error) {
+    document.getElementById('dwd-data').innerHTML = `<div class="error-msg">Bright Sky Fehler: ${bs.error}</div>`;
+    return;
+  }
+  const w = bs.weather?.[0];
+  if (!w) {
+    document.getElementById('dwd-data').innerHTML = `<div class="error-msg">Keine DWD Daten verfügbar.</div>`;
+    return;
+  }
+  const windKmh = w.wind_speed ? (w.wind_speed * 3.6).toFixed(1) : null;
+  document.getElementById('dwd-data').innerHTML = `
+    ${card('🌡️ Temperatur', fmt(w.temperature), '°C', '', 'DWD/BrightSky')}
+    ${card('🌡️ Gefühlte Temp.', fmt(w.dew_point), '°C Taupunkt', '', 'DWD/BrightSky')}
+    ${card('💧 Relative Feuchte', fmt(w.relative_humidity, 0), '%', '', 'DWD/BrightSky')}
+    ${card('🌧️ Niederschlag', fmt(w.precipitation), 'mm', '', 'DWD/BrightSky')}
+    ${card('💨 Wind', fmt(windKmh), 'km/h', '', 'DWD/BrightSky')}
+    ${card('🌬️ Luftdruck', fmt(w.pressure_msl, 0), 'hPa', '', 'DWD/BrightSky')}
+    ${card('☀️ Sonnenstrahlung', fmt(w.solar, 0), 'W/m²', '', 'DWD/BrightSky')}
+    ${card('📍 Station', bs.sources?.[0]?.station_name || '—', '', '', 'DWD/BrightSky')}
+    ${card('📏 Entfernung', bs.sources?.[0]?.distance ? fmt(bs.sources[0].distance/1000, 1) + ' km' : '—', '', '', 'DWD/BrightSky')}
+  `;
+}
+
+async function loadData() {
+  const btn = document.querySelector('.refresh-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Lade…';
+
+  ['om','air','dwd','wttr'].forEach(id => setDot(id, 'loading'));
+
+  document.getElementById('agrar-current').innerHTML = '<div class="loading-msg">⏳ Lade Agrarwetter…</div>';
+
+  try {
+    const params = new URLSearchParams({
+      lat: String(selectedStation.lat),
+      lon: String(selectedStation.lon),
+      name: selectedStation.label || selectedStation.name || ''
+    });
+    const res = await fetch(`/api/weather?${params}`);
+    const data = await res.json();
+
+    const om = data.open_meteo_agro;
+    const air = data.open_meteo_air;
+    const bs = data.bright_sky;
+    const wttr = data.wttr;
+    if (data.location) {
+      selectedStation = {
+        ...selectedStation,
+        name: data.location.name || selectedStation.name,
+        lat: Number(data.location.lat),
+        lon: Number(data.location.lon),
+        label: selectedStation.label
+      };
+    }
+
+    renderMeta();
+
+    setDot('om', om?.error ? 'error' : 'ok');
+    setDot('air', air?.error ? 'error' : 'ok');
+    setDot('dwd', bs?.error ? 'error' : 'ok');
+    setDot('wttr', wttr?.error ? 'error' : 'ok');
+
+    if (!om?.error && om?.current) {
+      renderAgrarCurrent(om);
+      renderSoil(om);
+      renderHourly(om);
+      renderForecast(om);
+    } else {
+      document.getElementById('agrar-current').innerHTML = `<div class="error-msg">Open-Meteo Fehler: ${om?.error||'Unbekannt'}</div>`;
+    }
+
+    renderPollen(air);
+    renderSourceCompare(om, wttr, bs);
+    renderDWD(bs);
+
+    const fetchTime = new Date(data.fetchedAt);
+    document.getElementById('last-fetch').textContent =
+      `Zuletzt geladen: ${fetchTime.toLocaleTimeString('de-DE')} Uhr`;
+
+    countdownSec = 600;
+
+  } catch(e) {
+    ['om','air','dwd','wttr'].forEach(id => setDot(id, 'error'));
+    document.getElementById('agrar-current').innerHTML = `<div class="error-msg">Fehler beim Laden: ${e.message}</div>`;
+  }
+
+  btn.disabled = false;
+  btn.textContent = '↻ Aktualisieren';
+}
+
+function startCountdown() {
+  clearInterval(refreshTimer);
+  refreshTimer = setInterval(() => {
+    countdownSec--;
+    const m = Math.floor(countdownSec / 60);
+    const s = (countdownSec % 60).toString().padStart(2,'0');
+    document.getElementById('countdown').textContent = `Auto-Refresh in ${m}:${s}`;
+    if (countdownSec <= 0) { loadData(); }
+  }, 1000);
+}
+
+restoreStation();
+renderMeta();
+const stationInput = document.getElementById('station-query');
+stationInput.value = stationLabel(selectedStation);
+
+stationInput.addEventListener('input', () => {
+  clearTimeout(stationSearchTimer);
+  stationSearchTimer = setTimeout(() => {
+    searchStations();
+  }, 250);
+});
+document.addEventListener('click', (evt) => {
+  const picker = evt.target.closest('.station-picker');
+  if (!picker) {
+    hideSuggestions();
+  }
+});
+
+loadData();
+startCountdown();
+</script>
+</body>
+</html>
