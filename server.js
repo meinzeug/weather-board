@@ -175,19 +175,23 @@ app.get('/api/weather', async (req, res) => {
 
   // 4. wttr.in
   const wttrUrl = `https://wttr.in/${LAT},${LON}?format=j1`;
+  // 5. MET Norway locationforecast (Öffentlich)
+  const metNoUrl = `https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=${LAT}&lon=${LON}`;
 
   // Fetch all in parallel
-  const [omAgro, omAir, brightSky, wttr] = await Promise.all([
+  const [omAgro, omAir, brightSky, wttr, metNo] = await Promise.all([
     fetchJSON(omAgroUrl),
     fetchJSON(omAirUrl),
     fetchJSON(brightSkyUrl),
     fetchJSON(wttrUrl),
+    fetchJSON(metNoUrl),
   ]);
 
   results.open_meteo_agro = omAgro;
   results.open_meteo_air = omAir;
   results.bright_sky = brightSky;
   results.wttr = wttr;
+  results.met_no = metNo;
   results.fetchedAt = new Date().toISOString();
   results.location = {
     name: activeLocation.name || DEFAULT_STATION.name,

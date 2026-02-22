@@ -58,6 +58,7 @@
   .grid-2 { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
   .grid-3 { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
   .grid-4 { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  .grid-5 { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
 
   .card {
     background: #161b22;
@@ -142,6 +143,12 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+  .source-block.average {
+    border-color: #7ee787;
+  }
+  .source-block.average h3 {
+    color: #7ee787;
   }
   .source-block .mini-grid {
     display: grid;
@@ -385,13 +392,14 @@
   </div>
 </header>
 
-<div id="status-bar">
-  <div class="status-item"><div class="dot loading" id="dot-om"></div> Open-Meteo Agrar</div>
-  <div class="status-item"><div class="dot loading" id="dot-air"></div> Luftqualität/Pollen</div>
-  <div class="status-item"><div class="dot loading" id="dot-dwd"></div> DWD / Bright Sky</div>
-  <div class="status-item"><div class="dot loading" id="dot-wttr"></div> wttr.in</div>
-  <div style="margin-left:auto;color:#6e7681" id="last-fetch">Lade Daten…</div>
-</div>
+  <div id="status-bar">
+    <div class="status-item"><div class="dot loading" id="dot-om"></div> Open-Meteo Agrar</div>
+    <div class="status-item"><div class="dot loading" id="dot-air"></div> Luftqualität/Pollen</div>
+    <div class="status-item"><div class="dot loading" id="dot-dwd"></div> DWD / Bright Sky</div>
+    <div class="status-item"><div class="dot loading" id="dot-wttr"></div> wttr.in</div>
+    <div class="status-item"><div class="dot loading" id="dot-met"></div> met.no</div>
+    <div style="margin-left:auto;color:#6e7681" id="last-fetch">Lade Daten…</div>
+  </div>
 
 <main>
   <!-- AGRARWETTER -->
@@ -399,7 +407,7 @@
   <div class="grid grid-2" id="agrar-current"></div>
 
   <div class="section-title">🌡️ Aktuelles Wetter — Quellenvergleich</div>
-  <div class="grid grid-3" id="source-compare"></div>
+  <div class="grid grid-5" id="source-compare"></div>
 
   <div class="section-title">🌍 Boden & Bodenfeuchte (Open-Meteo)</div>
   <div class="grid grid-4" id="soil-data"></div>
@@ -782,6 +790,11 @@ function fmt(v, dec=1) {
   return typeof v === 'number' ? v.toFixed(dec) : v;
 }
 
+function toNumber(v) {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 function setDot(id, state) {
   const el = document.getElementById('dot-'+id);
   if (!el) return;
@@ -798,14 +811,16 @@ function card(label, value, unit, extraClass='', source='', extra='') {
 }
 
 function average(values) {
-  const nums = values.filter(v => typeof v === 'number' && Number.isFinite(v));
+  const nums = (Array.isArray(values) ? values : [])
+    .map(toNumber)
+    .filter(v => v !== null);
   if (!nums.length) return null;
   const sum = nums.reduce((a, b) => a + b, 0);
   return sum / nums.length;
 }
 
 function sumValues(values) {
-  return values.reduce((acc, v) => acc + (typeof v === 'number' && Number.isFinite(v) ? v : 0), 0);
+  return (Array.isArray(values) ? values : []).reduce((acc, v) => acc + (toNumber(v) ?? 0), 0);
 }
 
 function buildDailyHourIndex(h) {
@@ -928,53 +943,213 @@ function renderPollen(air, om) {
   `;
 }
 
-function renderSourceCompare(om, wttr, bs) {
-  const idx = getRepresentativeIndex(om, selectedForecastDayIndex);
-  const currentIdx = Math.max(0, idx >= 0 ? idx : 0);
-  let omTemp = om?.hourly?.temperature_2m?.[currentIdx];
-  let omHum = om?.hourly?.relative_humidity_2m?.[currentIdx];
-  let omWind = om?.hourly?.wind_speed_10m?.[currentIdx];
-  let omCode = om?.daily?.weather_code?.[selectedForecastDayIndex] || om?.current?.weather_code || 1;
+const MET_NO_ICONS = {
+  clearsky_day: '☀️',
+  clearsky_night: '🌙',
+  clearsky_polartwilight: '☀️',
+  fair_day: '⛅',
+  fair_night: '☁️',
+  partlycloudy_day: '⛅',
+  partlycloudy_night: '☁️',
+  cloudy: '☁️',
+  lightrainshowers_day: '🌦️',
+  lightrainshowers_night: '🌦️',
+  rainshowers_day: '🌧️',
+  rainshowers_night: '🌧️',
+  lightrain: '🌦️',
+  rain: '🌧️',
+  heavyrain: '🌧️',
+  sleet: '🌨️',
+  lightsnow: '🌨️',
+  snow: '❄️',
+  heavysnow: '❄️',
+  fog: '🌫️',
+  thunder: '⛈️',
+  thunderstorm: '⛈️'
+};
 
-  let wttrTemp = wttr?.current_condition?.[0]?.temp_C;
-  let wttrHum = wttr?.current_condition?.[0]?.humidity;
-  let wttrWind = wttr?.current_condition?.[0]?.windspeedKmph;
-  let wttrDesc = wttr?.current_condition?.[0]?.lang_de?.[0]?.value || wttr?.current_condition?.[0]?.weatherDesc?.[0]?.value;
+function dayDateOrToday(om, dayIndex) {
+  const times = om?.daily?.time;
+  if (Array.isArray(times) && times[dayIndex]) return times[dayIndex];
+  return new Date().toISOString().slice(0, 10);
+}
 
-  let bsTemp = bs?.weather?.[0]?.temperature;
-  let bsHum = bs?.weather?.[0]?.relative_humidity;
-  let bsWind = bs?.weather?.[0]?.wind_speed ? (bs.weather[0].wind_speed * 3.6).toFixed(1) : null;
-  let bsPrecip = bs?.weather?.[0]?.precipitation;
+function getHourBucketForDay(om, dayIndex) {
+  const idx = getHourlyIndexesForDay(om, dayIndex);
+  if (idx.length) return idx;
+  const representative = getRepresentativeIndex(om, Math.max(0, dayIndex));
+  return representative >= 0 ? [representative] : [];
+}
 
-  document.getElementById('source-compare').innerHTML = `
-    <div class="source-block">
-      <h3>🌐 Open-Meteo</h3>
-      <div class="mini-grid">
-        <div class="mini-item"><div class="mini-label">Temperatur</div><div class="mini-val">${fmt(omTemp)}°C</div></div>
-        <div class="mini-item"><div class="mini-label">Feuchte</div><div class="mini-val">${fmt(omHum,0)}%</div></div>
-        <div class="mini-item"><div class="mini-label">Wind</div><div class="mini-val">${fmt(omWind)} km/h</div></div>
-        <div class="mini-item"><div class="mini-label">Wetter</div><div class="mini-val">${WMO_ICONS[omCode]||'—'} ${WMO_CODES[omCode]||'—'}</div></div>
+function extractOpenMeteoSource(om, dayIndex) {
+  if (!om || om.error) return { name: 'Open-Meteo', unavailable: true };
+  const h = om.hourly || {};
+  const d = om.daily || {};
+  const idx = getHourBucketForDay(om, dayIndex);
+  const rep = idx[Math.max(0, Math.min(idx.length - 1, Math.floor(idx.length / 2)))] ?? 0;
+  const temp = average(idx.map(i => h.temperature_2m?.[i]));
+  const humidity = average(idx.map(i => h.relative_humidity_2m?.[i]));
+  const wind = average(idx.map(i => h.wind_speed_10m?.[i]));
+  const precip = toNumber(d.precipitation_sum?.[dayIndex]) ?? sumValues(idx.map(i => h.precipitation?.[i]));
+  const codeFromDaily = toNumber(d.weather_code?.[dayIndex]);
+  const code = codeFromDaily === null ? (toNumber(om.current?.weather_code) ?? 1) : codeFromDaily;
+
+  return {
+    name: 'Open-Meteo',
+    temp: temp ?? toNumber(h.temperature_2m?.[rep]),
+    humidity: humidity ?? toNumber(h.relative_humidity_2m?.[rep]),
+    wind: wind ?? toNumber(h.wind_speed_10m?.[rep]),
+    precip: precip,
+    desc: `${WMO_ICONS[code] || '—'} ${WMO_CODES[code] || '—'}`,
+    unavailable: false
+  };
+}
+
+function extractWttrSource(wttr, dayIndex) {
+  if (!wttr || wttr.error) return { name: 'wttr.in', unavailable: true };
+  const current = wttr.current_condition?.[0] || {};
+  const days = Array.isArray(wttr.weather) ? wttr.weather : [];
+  const day = days[dayIndex] || days[0] || current;
+  const hourly = Array.isArray(day?.hourly) ? day.hourly : [];
+  const first = hourly[0] || {};
+
+  const temp = toNumber(day.avgtempC ?? day?.avgtemp ?? current.temp_C);
+  const humidity = toNumber(day.avghumidity ?? day.humidity ?? first.humidity ?? current.humidity);
+  const wind = toNumber(day.windspeedKmph ?? day.windspeedKmph ?? first.windspeedKmph ?? current.windspeedKmph);
+  const hourlyPrecip = toNumber(day?.hourly?.reduce((acc, h) => acc + (toNumber(h.precipMM) ?? 0), 0));
+  const precipFallback = toNumber(day.totalprecipMM) ?? toNumber(day.precipMM) ?? toNumber(current.precipMM);
+  const precip = hourlyPrecip === null ? precipFallback : hourlyPrecip;
+
+  const desc = day?.lang_de?.[0]?.value ||
+    first?.lang_de?.[0]?.value ||
+    day?.weatherDesc?.[0]?.value ||
+    first?.weatherDesc?.[0]?.value ||
+    current?.lang_de?.[0]?.value ||
+    current?.weatherDesc?.[0]?.value ||
+    '—';
+
+  return {
+    name: 'wttr.in',
+    temp,
+    humidity,
+    wind,
+    precip,
+    desc,
+    unavailable: [temp, humidity, wind, precip].every(v => v === null)
+  };
+}
+
+function normalizeEntriesForDay(entries, dayDate) {
+  if (!Array.isArray(entries)) return [];
+  const sameDay = entries.filter(item => String(item?.time ?? item?.time_local ?? item?.timestamp ?? item?.date ?? '').slice(0, 10) === dayDate);
+  return sameDay.length ? sameDay : entries.slice(0, 1);
+}
+
+function extractBrightSkySource(bs, dayDate) {
+  if (!bs || bs.error) return { name: 'DWD/Bright Sky', unavailable: true };
+  const rows = normalizeEntriesForDay(bs.weather || [], dayDate);
+  if (!rows.length) return { name: 'DWD/Bright Sky', unavailable: true };
+
+  const temp = average(rows.map(item => toNumber(item?.temperature)));
+  const humidity = average(rows.map(item => toNumber(item?.relative_humidity)));
+  const wind = average(rows.map(item => toNumber(item?.wind_speed) === null ? null : toNumber(item.wind_speed) * 3.6));
+  const precip = rows.length > 1
+    ? sumValues(rows.map(item => toNumber(item.precipitation)))
+    : toNumber(rows[0].precipitation);
+
+  return {
+    name: 'DWD/Bright Sky',
+    temp,
+    humidity,
+    wind,
+    precip,
+    desc: rows[0]?.description || rows[0]?.icon || '—',
+    unavailable: [temp, humidity, wind, precip].every(v => v === null)
+  };
+}
+
+function extractMetNoSource(met, dayDate) {
+  const timeseries = Array.isArray(met?.properties?.timeseries) ? met.properties.timeseries : [];
+  if (!timeseries.length) return { name: 'met.no', unavailable: true };
+  const rows = normalizeEntriesForDay(timeseries.map(item => ({
+    time: item?.time,
+    temperature: item?.data?.instant?.details?.air_temperature,
+    humidity: item?.data?.instant?.details?.relative_humidity,
+    wind_speed: item?.data?.instant?.details?.wind_speed,
+    precipitation: toNumber(item?.data?.next_1_hours?.details?.precipitation_amount ?? item?.data?.next_6_hours?.details?.precipitation_amount ?? item?.data?.next_12_hours?.details?.precipitation_amount),
+    symbol: item?.data?.next_1_hours?.summary?.symbol_code || item?.data?.next_6_hours?.summary?.symbol_code || item?.data?.next_12_hours?.summary?.symbol_code
+  })).filter(item => item.time), dayDate);
+  if (!rows.length) return { name: 'met.no', unavailable: true };
+
+  const temp = average(rows.map(item => item.temperature));
+  const humidity = average(rows.map(item => item.humidity));
+  const wind = average(rows.map(item => toNumber(item.wind_speed) === null ? null : toNumber(item.wind_speed) * 3.6));
+  const precip = rows.length > 1 ? sumValues(rows.map(item => item.precipitation)) : rows[0].precipitation;
+  const symbol = rows[0].symbol;
+
+  return {
+    name: 'met.no',
+    temp,
+    humidity,
+    wind,
+    precip,
+    desc: symbol ? `${MET_NO_ICONS[symbol] || '🌤️'} ${symbol}` : '—',
+    unavailable: [temp, humidity, wind, precip].every(v => v === null)
+  };
+}
+
+function renderSourceCompare(om, wttr, bs, met) {
+  const dayIndex = Math.max(0, selectedForecastDayIndex);
+  const dayDate = dayDateOrToday(om, dayIndex);
+  const sourceRows = [
+    extractOpenMeteoSource(om, dayIndex),
+    extractWttrSource(wttr, dayIndex),
+    extractBrightSkySource(bs, dayDate),
+    extractMetNoSource(met, dayDate)
+  ];
+
+  const avgTemp = average(sourceRows.map(s => s.temp));
+  const avgHum = average(sourceRows.map(s => s.humidity));
+  const avgWind = average(sourceRows.map(s => s.wind));
+  const avgPrecip = average(sourceRows.map(s => s.precip));
+
+  const rowCard = (source) => {
+    if (!source || source.unavailable) {
+      return `
+        <div class="source-block">
+          <h3>⚠️ ${source?.name || 'Quelle'}</h3>
+          <div class="mini-grid">
+            <div class="mini-item"><div class="mini-label">Status</div><div class="mini-val">keine Daten</div></div>
+          </div>
+        </div>
+      `;
+    }
+    return `
+      <div class="source-block">
+        <h3>🔎 ${source.name}</h3>
+        <div class="mini-grid">
+          <div class="mini-item"><div class="mini-label">Temperatur</div><div class="mini-val">${source.temp !== null ? fmt(source.temp) : '—'}°C</div></div>
+          <div class="mini-item"><div class="mini-label">Luftfeuchte</div><div class="mini-val">${source.humidity !== null ? fmt(source.humidity, 0) : '—'}%</div></div>
+          <div class="mini-item"><div class="mini-label">Wind</div><div class="mini-val">${source.wind !== null ? fmt(source.wind) : '—'} km/h</div></div>
+          <div class="mini-item"><div class="mini-label">Niederschlag</div><div class="mini-val">${source.precip !== null ? fmt(source.precip) : '—'} mm</div></div>
+          <div class="mini-item" style="grid-column:1 / span 2"><div class="mini-label">Lage</div><div class="mini-val" style="font-size:0.95rem">${source.desc || '—'}</div></div>
+        </div>
       </div>
-    </div>
-    <div class="source-block">
-      <h3>🌍 wttr.in</h3>
+    `;
+  };
+
+  document.getElementById('source-compare').innerHTML = [
+    ...sourceRows.map(rowCard),
+    `<div class="source-block average">
+      <h3>📊 Durchschnitt (alle verfügbaren)</h3>
       <div class="mini-grid">
-        <div class="mini-item"><div class="mini-label">Temperatur</div><div class="mini-val">${wttrTemp||'—'}°C</div></div>
-        <div class="mini-item"><div class="mini-label">Feuchte</div><div class="mini-val">${wttrHum||'—'}%</div></div>
-        <div class="mini-item"><div class="mini-label">Wind</div><div class="mini-val">${wttrWind||'—'} km/h</div></div>
-        <div class="mini-item"><div class="mini-label">Beschreibung</div><div class="mini-val" style="font-size:0.85rem">${wttrDesc||'—'}</div></div>
+        <div class="mini-item"><div class="mini-label">Temperatur</div><div class="mini-val">${avgTemp !== null ? avgTemp.toFixed(1) : '—'}°C</div></div>
+        <div class="mini-item"><div class="mini-label">Luftfeuchte</div><div class="mini-val">${avgHum !== null ? avgHum.toFixed(0) : '—'}%</div></div>
+        <div class="mini-item"><div class="mini-label">Wind</div><div class="mini-val">${avgWind !== null ? avgWind.toFixed(1) : '—'} km/h</div></div>
+        <div class="mini-item"><div class="mini-label">Niederschlag</div><div class="mini-val">${avgPrecip !== null ? avgPrecip.toFixed(1) : '—'} mm</div></div>
       </div>
-    </div>
-    <div class="source-block">
-      <h3>🏛️ DWD / Bright Sky</h3>
-      <div class="mini-grid">
-        <div class="mini-item"><div class="mini-label">Temperatur</div><div class="mini-val">${bsTemp !== null && bsTemp !== undefined ? fmt(bsTemp) : '—'}°C</div></div>
-        <div class="mini-item"><div class="mini-label">Feuchte</div><div class="mini-val">${bsHum !== null && bsHum !== undefined ? fmt(bsHum,0) : '—'}%</div></div>
-        <div class="mini-item"><div class="mini-label">Wind</div><div class="mini-val">${bsWind||'—'} km/h</div></div>
-        <div class="mini-item"><div class="mini-label">Niederschlag</div><div class="mini-val">${bsPrecip !== null && bsPrecip !== undefined ? fmt(bsPrecip) : '—'} mm</div></div>
-      </div>
-    </div>
-  `;
+    </div>`
+  ].join('');
 }
 
 function renderHourly(om) {
@@ -1130,6 +1305,7 @@ function renderDashboardFromPayload(data) {
   const air = data.open_meteo_air;
   const bs = data.bright_sky;
   const wttr = data.wttr;
+  const met = data.met_no;
   if (data.location) {
     selectedStation = {
       ...selectedStation,
@@ -1150,6 +1326,7 @@ function renderDashboardFromPayload(data) {
   setDot('air', air?.error ? 'error' : 'ok');
   setDot('dwd', bs?.error ? 'error' : 'ok');
   setDot('wttr', wttr?.error ? 'error' : 'ok');
+  setDot('met', met?.error ? 'error' : 'ok');
 
   if (!om?.error && om?.current) {
     renderAgrarCurrent(om);
@@ -1163,7 +1340,7 @@ function renderDashboardFromPayload(data) {
   }
 
     renderPollen(air, om);
-  renderSourceCompare(om, wttr, bs);
+  renderSourceCompare(om, wttr, bs, met);
   renderDWD(bs);
 }
 
@@ -1172,7 +1349,7 @@ async function loadData() {
   btn.disabled = true;
   btn.textContent = '⏳ Lade…';
 
-  ['om','air','dwd','wttr'].forEach(id => setDot(id, 'loading'));
+  ['om','air','dwd','wttr','met'].forEach(id => setDot(id, 'loading'));
 
   document.getElementById('agrar-current').innerHTML = '<div class="loading-msg">⏳ Lade Agrarwetter…</div>';
 
@@ -1199,7 +1376,7 @@ async function loadData() {
     countdownSec = 600;
 
   } catch(e) {
-    ['om','air','dwd','wttr'].forEach(id => setDot(id, 'error'));
+    ['om','air','dwd','wttr','met'].forEach(id => setDot(id, 'error'));
     document.getElementById('agrar-current').innerHTML = `<div class="error-msg">Fehler beim Laden: ${e.message}</div>`;
     document.getElementById('daily-detail').innerHTML = `<div class="error-msg">Detaillierte Tagesdaten nicht verfügbar.</div>`;
   }
