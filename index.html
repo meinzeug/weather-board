@@ -152,6 +152,54 @@
   .source-block .mini-label { font-size: 0.7rem; color: #6e7681; }
   .source-block .mini-val { font-size: 1.1rem; font-weight: 600; }
 
+  .daily-detail-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+  .daily-detail-card {
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .daily-detail-card .day-title {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #7ee787;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .daily-detail-card .day-code {
+    color: #8b949e;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .daily-detail-card .day-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .daily-detail-card .day-stat {
+    border: 1px solid #21262d;
+    border-radius: 8px;
+    padding: 8px;
+  }
+  .daily-detail-card .day-stat .label {
+    font-size: 0.68rem;
+    color: #6e7681;
+    margin-bottom: 4px;
+  }
+  .daily-detail-card .day-stat .value {
+    font-size: 1rem;
+    color: #c9d1d9;
+    font-weight: 600;
+  }
+
   /* Pollen */
   .pollen-bar {
     height: 8px;
@@ -323,6 +371,9 @@
     </table>
   </div>
 
+  <div class="section-title">📆 Tägliche Detailansicht (Nächste 7 Tage)</div>
+  <div class="daily-detail-grid" id="daily-detail"></div>
+
   <div class="section-title">🏛️ DWD Offizielle Messdaten (Bright Sky)</div>
   <div class="grid grid-3" id="dwd-data"></div>
 </main>
@@ -492,6 +543,27 @@ function card(label, value, unit, extraClass='', source='', extra='') {
     ${extra}
     ${source ? `<span class="source-tag">${source}</span>` : ''}
   </div>`;
+}
+
+function average(values) {
+  const nums = values.filter(v => typeof v === 'number' && Number.isFinite(v));
+  if (!nums.length) return null;
+  const sum = nums.reduce((a, b) => a + b, 0);
+  return sum / nums.length;
+}
+
+function sumValues(values) {
+  return values.reduce((acc, v) => acc + (typeof v === 'number' && Number.isFinite(v) ? v : 0), 0);
+}
+
+function buildDailyHourIndex(h) {
+  const bucket = new Map();
+  h.time.forEach((ts, idx) => {
+    const day = ts.slice(0, 10);
+    if (!bucket.has(day)) bucket.set(day, []);
+    bucket.get(day).push(idx);
+  });
+  return bucket;
 }
 
 function renderAgrarCurrent(om) {
@@ -665,6 +737,80 @@ function renderForecast(om) {
   document.getElementById('forecast-body').innerHTML = html;
 }
 
+function renderDailyDetail(om) {
+  const d = om.daily;
+  const h = om.hourly;
+  if (!d?.time || !h?.time) {
+    document.getElementById('daily-detail').innerHTML =
+      `<div class="error-msg">Detaillierte Tagesdaten nicht verfügbar.</div>`;
+    return;
+  }
+
+  const dailyHours = buildDailyHourIndex(h);
+  const cards = d.time.map((day, idx) => {
+    const ts = day.slice(0, 10);
+    const dayHours = dailyHours.get(ts) || [];
+    const tmax = d.temperature_2m_max?.[idx];
+    const tmin = d.temperature_2m_min?.[idx];
+    const prc = d.precipitation_sum?.[idx];
+    const pop = d.precipitation_probability_max?.[idx];
+    const wind = d.wind_speed_10m_max?.[idx];
+    const rad = d.shortwave_radiation_sum?.[idx];
+    const et0 = d.et0_fao_evapotranspiration?.[idx];
+    const wxCode = d.weather_code?.[idx];
+    const wxTxt = WMO_CODES[wxCode] || '—';
+
+    const hum = dayHours.map(i => h.relative_humidity_2m?.[i]).filter(v => typeof v === 'number');
+    const precip = dayHours.map(i => h.precipitation?.[i]).filter(v => typeof v === 'number');
+    const windAvg = dayHours.map(i => h.wind_speed_10m?.[i]).filter(v => typeof v === 'number');
+    const dew = dayHours.map(i => h.soil_temperature_0cm?.[i]).filter(v => typeof v === 'number');
+
+    const dayObj = new Date(ts + 'T00:00:00');
+    const dayHeader = `${DAYS[dayObj.getDay()]} ${String(dayObj.getDate()).padStart(2,'0')}. ${MONTHS[dayObj.getMonth()]}`;
+    const rainSum = sumValues(precip);
+    const humAvg = average(hum);
+    const windAvgVal = average(windAvg);
+    const dewAvg = average(dew);
+
+    return `
+      <div class="daily-detail-card">
+        <div class="day-title">
+          <span>📆 ${dayHeader}</span>
+          <span class="day-code">${WMO_ICONS[wxCode] || '—'} ${wxTxt}</span>
+        </div>
+        <div class="day-stats">
+          <div class="day-stat">
+            <div class="label">Temp. (min / max)</div>
+            <div class="value">${fmt(tmin)}° / ${fmt(tmax)}°C</div>
+          </div>
+          <div class="day-stat">
+            <div class="label">Mittlere Luftfeuchte</div>
+            <div class="value">${humAvg !== null ? humAvg.toFixed(0) : '—'} %</div>
+          </div>
+          <div class="day-stat">
+            <div class="label">Niederschlag / Regenchance</div>
+            <div class="value">${rainSum !== null ? rainSum.toFixed(1) : '—'} / ${fmt(prc,0)}%</div>
+          </div>
+          <div class="day-stat">
+            <div class="label">Wind</div>
+            <div class="value">${fmt(wind, 1)} km/h (${windAvgVal !== null ? 'Ø ' + windAvgVal.toFixed(1) : '—'})</div>
+          </div>
+          <div class="day-stat">
+            <div class="label">Bodentemp. Ø 0 cm</div>
+            <div class="value">${dewAvg !== null ? dewAvg.toFixed(1) : '—'}°C</div>
+          </div>
+          <div class="day-stat">
+            <div class="label">Energie/ET₀</div>
+            <div class="value">${et0 !== null && et0 !== undefined ? et0.toFixed(2) : '—'} / ${fmt(rad,0)} MJ/m²</div>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+
+  document.getElementById('daily-detail').innerHTML = cards.join('');
+}
+
 function renderDWD(bs) {
   if (bs.error) {
     document.getElementById('dwd-data').innerHTML = `<div class="error-msg">Bright Sky Fehler: ${bs.error}</div>`;
@@ -733,8 +879,10 @@ async function loadData() {
       renderSoil(om);
       renderHourly(om);
       renderForecast(om);
+      renderDailyDetail(om);
     } else {
       document.getElementById('agrar-current').innerHTML = `<div class="error-msg">Open-Meteo Fehler: ${om?.error||'Unbekannt'}</div>`;
+      document.getElementById('daily-detail').innerHTML = `<div class="error-msg">Detaillierte Tagesdaten nicht verfügbar.</div>`;
     }
 
     renderPollen(air);
@@ -750,6 +898,7 @@ async function loadData() {
   } catch(e) {
     ['om','air','dwd','wttr'].forEach(id => setDot(id, 'error'));
     document.getElementById('agrar-current').innerHTML = `<div class="error-msg">Fehler beim Laden: ${e.message}</div>`;
+    document.getElementById('daily-detail').innerHTML = `<div class="error-msg">Detaillierte Tagesdaten nicht verfügbar.</div>`;
   }
 
   btn.disabled = false;
